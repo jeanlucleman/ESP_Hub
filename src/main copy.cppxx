@@ -1,0 +1,377 @@
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* ESP8266 ESP-01 wifi switch                                  Version 1.0 5/06/2021*
+*                                                                                      *
+* This code sets the ESP8266 ESP-01 up as a UDP Access Point (Server) that receives    *
+* the On/Off state of a switch connected to another ESP8266 ESP-01 module that is set  *
+* up as a UDP Client.                                *
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+//Libraries Included
+#include <ESP8266WiFi.h>
+#include <WiFiUDP.h>
+#include <ESP8266HTTPClient.h>
+#include "wifiSwitch.h"
+#include "global.h"
+#include <ESPAsyncWebServer.h>
+#include <LittleFS.h>
+#include <NTPClient.h>  // voir https://randomnerdtutorials.com/esp8266-nodemcu-date-time-ntp-client-server-arduino/
+#include "clock.h"
+#include "functions.h"
+
+//Authentication Variables that will be used by the UDP clients (wifiSwitches)
+// String     AP_SSID;                  // WIFI Name of this Access Point giving access to the ESP8266 though AP mode (ex. 192.168.4.1)
+// String     AP_PSW;                   // Password to access this AP
+//Authentication Variables that will be used by the http clients (users)
+// String STA_SSID;                      // WIFI Name of the router allowing access to the ESP8266 through the home router (ex. 192.168.2.98)
+// String STA_PSW;                       // PSW of home router
+//WiFi settings for the AP mode
+IPAddress APlocal_IP(192, 168, 4, 1);   //Access Point (AP) Local IP Address
+IPAddress APgateway(192, 168, 4, 1);    //Access Point (AP) Gateway Address
+IPAddress APsubnet(255, 255, 255, 0);   //Access Point (AP) Subnet Address
+unsigned int UDPPort = 2390;            //Local port to listen on
+WiFiUDP Udp;
+
+// Wifi settings for the STA mode: read from the setting file
+bool staModeOK=false;
+/*--------Time and date management---- */
+unsigned long currentMillis;
+unsigned long lastTimeRequestMillis;
+NTPClient timeClient(Udp, "pool.ntp.org",3600,3600); // works only if STA mode OK. Time offset 1 hour, update each hour. See https://randomnerdtutorials.com/esp8266-nodemcu-date-time-ntp-client-server-arduino/
+Clock* myClock=Clock::getInstance(); // Creates a clock. It gives the current date/time by date/time at t0 + millis elapsed since t0.
+  // t0 is the date/time given by a call to OTP at t0
+//Week Days
+String weekDays[7]={"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+//Month names
+String months[12]={"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+/* -----------------------------------*/
+
+
+AsyncWebServer * server;                // Server creation (it can be access from AP of STA mode)
+String pageName; // Nom de la page html à afficher (appelé dans templateSTA.html, ex. info => info.html qui est dans le répertoire data, )
+  
+//Other Variables
+char packetBuffer[255];                 //buffer to hold incoming packet from UDP exchanges
+char Ack1[4] = "BAD";
+char Ack2[4] = "ACK";
+char* AckMsg;                           //Acknowledge message sent back to Client
+
+
+/* #region Fonctions */
+  void handleClients();                   // Check if there is UDP clients and read, if any, incoming data
+  void setupWifi();                       // Start wifi in AP and STA modes
+  void startHubServer();                  // Start the server on this ESP8266
+  void checkWifi();                       // Check wifi status and setup wifi when not connected 
+  void printDated(String text);           // Format serial output with date
+  void printlnDated(String text);         // Format serial output with date and CR
+  bool setupClock();                      // Initialize a NTP client to connect on a NTP server to get time and date
+  bool setClockFromOTP();                 // Get time and date from a NTP client and update the clock (see Clock class)
+  void maintainClock();                   // Periodically check the clock and update
+/* #endregion */
+//====================================================================================
+void setup() 
+  {
+    Serial.begin(74880);                       //Set Serial Port to 115200 baud
+    if (!initialisations())
+      {
+        debugln(F("Initialization failed!"));
+        return;
+      }
+    WiFi.disconnect();                                  //Stop active previous WIFI
+    checkWifi();           // Function to check wifi status and to setup wifi when not connected
+    setupClock();
+    printlnDated("Setup completed!");
+  }
+
+//====================================================================================
+void loop() 
+  {
+    currentMillis=millis();
+    handleClients();            // Function to handle UDP client
+    // maintainClock(); /* Mise à jour de l'horloge une fois par heure (ou toutes les min si l'heure est manifestement fausse) */
+  }
+
+//=================================  SUBROUTINES  ====================================
+
+void handleClients()
+  {
+    int packetSize = Udp.parsePacket();                    //Check for received data in the  packet
+    if (packetSize) 
+      {                                      //Is there data in the packet?
+        debug("Received packet of size ");
+        debugln(packetSize);
+        debug("From ");
+        debug(Udp.remoteIP());
+        debug(", port ");
+        debugln(Udp.remotePort());
+        int len = Udp.read(packetBuffer, 255);               //Read the packet into packetBufffer with an expected
+        // format  Switch=xyy:yy:yy:yy:yy:yy where x = 0 or 1 and yy:yy... is the MAC address of esp01 switch
+        if (len > 0) 
+          {
+            packetBuffer[len] = 0;                             //Add a null character to end of packet
+          }
+        debug("Contents: ");
+        debugln(packetBuffer);
+        //Check received data and send appropriate acknowledge back
+        AckMsg = Ack1;                                       //Preset acknowledge message to 'BAD'
+        char* p;
+        p=strstr(packetBuffer,"Switch=");
+        if(len==26 and p)
+          {
+            debugln("FOUND");
+            String myMac= String(packetBuffer).substring(8,25);
+            debugln(myMac);
+            int index=getIndexWifiSwitch(myMac); 
+            // WifiSwitch mySwitch = getWifiSwitch(myMac);         // Retrieve the switch object
+            if (wifiSwitch[index].setState(atoi(&packetBuffer[7])))       // If there is state changed then ...
+            //if(mySwitch.setState(atoi(&packetBuffer[7])))       // If there is state changed then ...
+              {
+                debugf2("Ici le state est %d\n",wifiSwitch[index].getState());
+                debugln((wifiSwitch[index].getState()==enmSwitchState::closed)?"Closed":"Open");
+                // Place here action needed when switch state changes
+              
+                if(atoi(&packetBuffer[7])==enmSwitchState::open)
+                  {
+                    debugln("Open");
+                  }
+                else
+                  {
+                    debugln("Closed");
+                  }
+              }
+            else{debugln("No change");}
+            AckMsg = Ack2; 
+          }
+        Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());   //Send acknowledge response packet to client
+        Udp.write(AckMsg);
+        Udp.endPacket();
+    }
+  }
+void getCredentials(String& AP_SSID, String& AP_PSW, String& STA_SSID, String& STA_PSW)
+  {
+    AP_SSID  = commonData.getValue("AP_SSID");
+    AP_PSW   = commonData.getValue("AP_PSW");
+    STA_SSID = commonData.getValue("STA_SSID");
+    STA_PSW  = commonData.getValue("STA_PSW");
+  }
+void checkWifi()      // Function to check wifi status and to setup wifi when not connected
+  {
+    if (WiFi.isConnected() and WiFi.status()==WL_CONNECTED)
+      {
+        debugln("Wifi is connected!");
+      }
+    else
+      {
+
+        debugln("Wifi is not connected");
+        setupWifi();        
+      }
+  }
+void setupWifi(){                
+  WiFi.disconnect();                                  //Stop active previous WIFI
+  String AP_SSID, AP_PSW, STA_SSID, STA_PSW; 
+  getCredentials(AP_SSID,AP_PSW, STA_SSID, STA_PSW);  // Gets credentials for AP and STA configuration
+  WiFi.mode(WIFI_AP_STA);                             //Set WiFi mode to AP and STA 
+  debugln("WIFI Mode set to: AP Station");
+  // Configuring AP
+  WiFi.softAPConfig(APlocal_IP, APgateway, APsubnet);  
+  WiFi.softAP(AP_SSID.c_str(), AP_PSW.c_str(), 1 ,0, NBMAXWIFISWITCH);              //WiFi.softAP(ssid, password, channel, hidden, max_connection)                         
+  debugln("WIFI Named " + AP_SSID + " Started"); //Send info to monitor if debug = true
+  delay(50);                                             //Wait a bit
+  IPAddress IP = WiFi.softAPIP();                        //Get server IP
+  debug("AccessPoint IP: ");
+  debugln(IP);
+
+
+  // Starting UDP to exchange between switches and this ESP
+  Udp.begin(UDPPort);                                    //Start UDP Server
+  debugln("UDP server started on access point");
+return;
+  // Configuring STA
+  IPAddress local_IP ; // todo: A lire sur le serveur setting
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress dns; // Cette ligne est nécessaire si on appelle des sites extérieurs (comme pool.ntp.ord).
+  local_IP.fromString(commonData.getValue("staIp"));
+  gateway.fromString(commonData.getValue("staGateway")); //192, 168, 2, 1);
+  subnet.fromString(commonData.getValue("staSubnet")); //(255, 255, 0, 0);
+  dns.fromString(commonData.getValue("staDNS")); //(192, 168, 2, 1); // Cette ligne est nécessaire si on appelle des sites extérieurs (comme pool.ntp.ord).
+    
+  if (!WiFi.config(local_IP, gateway, subnet, dns)) // Configures static IP address
+    {
+      debugln("STA Failed to configure");
+    }
+  WiFi.begin(STA_SSID.c_str(), STA_PSW.c_str());
+  delay(100);
+  debugln(F("Tentative de connexion en mode STA..."));
+  unsigned long startMillis = millis();
+  staModeOK=true;
+  while (WiFi.status() != WL_CONNECTED)
+    {
+      yield();
+      if (millis() > startMillis + 10000)
+        {
+          debugln(F("\nWifi connexion in STA mode timeout reached!"));
+          staModeOK=false;
+          break;
+        }
+      delay(1000);
+      debug(".");
+    }
+  if(staModeOK)
+    {
+      debugln("\nAdresse IP sur le réseau : " + WiFi.localIP().toString());
+      debugln("Adresse DNS              : " + WiFi.dnsIP().toString());
+      debugln("Gateway                  : " + WiFi.gatewayIP().toString());
+      debug("Connexion OK en mode STA sur ");
+      debugln(WiFi.localIP());
+    }
+  // Starting server (if STA mode fails, is accessible in AP mode on 192.168.4.1)
+  debug("Mac address: ")
+  debugln(WiFi.macAddress());
+  startHubServer(); 
+}
+
+  String processorTemplate(const String &var)
+    { // le & signifie que var est passé par référence
+      if (var == "ESPNAME")
+        {
+          return commonData.getValue("espName");
+          //return espName;
+        }
+      if (var == "DESCRIPTION")
+        {
+          return commonData.getDescription("espName");
+          //return espName;
+        }
+      if (var== "PAGENAME")
+        {
+          return pageName;
+        }
+      return "";
+    }
+
+
+void startHubServer()
+  {
+    #ifdef ESP_32
+      #define FILESYSTEM SPIFFS
+    #elif defined ESP_8266
+      #define FILESYSTEM LittleFS
+    #endif
+    server = new AsyncWebServer(80);
+
+
+      server->on("/w3.css", HTTP_GET, [](AsyncWebServerRequest *request) 
+        {
+          request->send(FILESYSTEM, "/w3.css", "text/css");
+        }
+      );
+      server->on("/functions.js", HTTP_GET, [](AsyncWebServerRequest *request) 
+        {
+          request->send(FILESYSTEM, "/functions.js", "text/javascript");
+        });
+      server->on("/copyright.js", HTTP_GET, [](AsyncWebServerRequest *request) 
+        {
+          request->send(FILESYSTEM, "/copyright.js", "text/javascript");
+        });
+      server->on("/settings.js", HTTP_GET, [](AsyncWebServerRequest *request) 
+        {
+          request->send(FILESYSTEM, "/settings.js", "text/javascript");
+        });
+      server->on("/jquery-3.4.1.min.js", HTTP_GET, [](AsyncWebServerRequest *request) 
+        {
+          request->send(FILESYSTEM, "/jquery-3.4.1.min.js", "text/javascript");
+        });
+      server->on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request) 
+        {
+          request->send(FILESYSTEM, "/favicon.png", "image/png");
+        });
+      // server->on("/config.html", HTTP_GET, [](AsyncWebServerRequest *request) 
+      //   {
+      //     request->send(FILESYSTEM, "/config.html", String(), false, processorConfig);
+      //   });
+      // server->on("/info.html", HTTP_GET, [](AsyncWebServerRequest *request) 
+      //   {
+      //   request->send(FILESYSTEM, "/info.html", String(), false, processorInfo);
+      //   });  
+
+
+
+    server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) 
+      {
+        pageName="info";
+        request->send(FILESYSTEM, "/templateSTA.html", String(), false, processorTemplate);
+      });
+    server->begin();
+  }
+
+
+
+/**
+ * @brief Prints on the serial console a text with a time prefix. No carriage return at end of line
+ * @param text texte to be displayed
+ */
+  void printDated(String text)
+    {
+     debug(myClock->getNow_YYYY_MM_DD_HH_MM_SS() + " " +  text);
+    }
+  /**
+   * @brief Prints on the serial console a text with a time prefix.Carriage return at end of line
+   * 
+   * @param text texte to be displayed
+   */
+  void printlnDated(String text)
+    {
+      // Serial.println(text);
+     debugln(myClock->getNow_YYYY_MM_DD_HH_MM_SS() + " " +  text);
+    }
+
+
+bool setupClock()
+  {
+    if(staModeOK)
+      {
+        debugln("staMode is OK, starting otp time...");
+        timeClient.begin();  // Initialize a NTPClient to get time
+        timeClient.setTimeOffset(commonData.getValue("GMT_offset").toInt()*3600);// To be read from settingsto  adjust for your timezone
+        return setClockFromOTP();
+      }
+    return false;
+  }
+  // This function send http request to the central, ex. http://192.168.2.32:8090/getTime. The central should return a string representing the number N0 
+  // of seconds since 1/1/1970 (UNIX EPOCH).
+  // This string is converted in unsigned long and initializes the clock (N0 <=> millis() at the time t0 of initialization)
+  // True is reported if the operation succeeds.
+bool setClockFromOTP()
+    {
+      debugln("Trying to set myClock");
+      if(staModeOK)
+        {
+          timeClient.update();
+          time_t epochTime = timeClient.getEpochTime();
+          myClock->setClockFromUC(epochTime);
+          printlnDated(F("Clock has been updated from OTP server"));
+          return true;
+        }
+      else 
+        {
+          printlnDated(F("Clock update not done because STA is off"));
+          return false;
+        }
+    }
+void maintainClock()
+  {
+    unsigned long period;
+    if (myClock->lastTimeUpdate < EPOCH_1_1_2019)
+      { // If yes, the clock in not correct!
+        period = 60000; // Check each min.
+      }
+    else
+      {
+        period = 3600000; // Otherwise, check each h.
+      }
+    if (currentMillis > lastTimeRequestMillis + period)
+      {
+        setClockFromOTP();
+        lastTimeRequestMillis=millis();
+      }
+  }

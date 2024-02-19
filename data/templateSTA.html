@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<!--
+To change this license header, choose License Headers in Project Properties.
+To change this template file, choose Tools | Templates
+and open the template in the editor.
+-->
+<html lang="fr">
+
+ 
+<head>
+  <title>Contrôle de fermeture des volets</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8" /> <!-- A mettre tout en haut sinon problème d'accent dans les alert de JS -->
+  <!--<input type="hidden" id="idESPNAME" value=%ESPNAME%> <!-- the purpose of this hidden field is give access to the below script to the ESP device name-->
+  <script>
+    // The aim of this script is to adapt the href link if the page is called directly from STA ip of the device or if it is called from the proxy (so from inside or from outside)
+    //var espName=document.getElementById("idESPNAME").value; // we retrieve the esp name. This name is use in the URL when the device is called from the proxy
+    var loc="/"; 
+    //   }
+    //alert(loc);
+  </script>
+  <script type="text/javascript" src="jquery-3.4.1.min.js"></script>
+<!--  <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js"></script>-->
+  <script type="text/javascript" src="functions.js"></script>
+
+
+  <link rel="stylesheet" type="text/css" href="w3.css">
+  <style>
+	h1 {font-size: 48px;text-align: center;}	
+	h2 {font-size: 36px;text-align: center;}
+	h3 {font-size: 36px;}
+	h4 {font-size: 24px;text-align:center;}
+	h5 {font-size: 20px;}
+	h6 {font-size: 18px;}
+	hr {border-color:black; margin-left:15%;margin-right:15%;}
+	td {border:0px solid red; padding-left:10px!important;}
+  .w3-input {border:1px solid black;padding:3px;}
+</style>
+<script> 
+  $(function(){
+    $("#includedContent").load("%PAGENAME%.html"); // lors du chargement de la page, l'élément d'id includecontent est rempli avec le contenu du fichier html.
+  });
+  </script>
+</head>
+
+
+  <body onload="colorMenu()">
+
+
+	<div class="w3-sidebar w3-bar-block w3-collapse w3-card w3-animate-left" style="width:200px;background-color: #d8e4e4;" id="mySidebar">
+    <button class="w3-bar-item w3-button w3-large w3-hide-large" style="text-align:right;" onclick="w3_close()">&times;</button>
+    <h4>MENU</h4>
+    <button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtoninfo" onclick="window.location.href = loc">Information</button>
+    <button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtonconfig" onclick="window.location.href = loc +  'config'">Configuration</button>
+		<button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtonsensors" onclick="window.location.href = loc +  'sensors'">Liste des détecteurs</button>
+		<button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtonstatus" onclick="window.location.href = loc +  'status'">Etat des détecteurs</button>
+    <!--<button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtonconfig" onclick="window.location.href = '/%ESPNAME%/config'">Configuration</button>-->
+    <!-- <button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtondomus" onclick="window.location.href = loc + 'domus'">Domus</button> -->
+    <!--<button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtonlog" onclick="window.location.href = loc + 'log'">Log</button>-->
+    <button class="w3-bar-item w3-button tablink w3-hover-black" id="idButtonfiles" onclick="window.location.href = loc + 'files'">Fichiers</button>
+    <button class="w3-bar-item w3-button tablink w3-hover-black" onclick="window.location.href = loc + 'reboot';">Reboot</button>
+	</div>
+	
+  
+	<div class="w3-main" style="margin-left:200px">
+		<div class="w3-teal">
+			<div style="display:flex">
+				<div><button class="w3-button w3-teal w3-xlarge w3-hide-large"  onclick="w3_open()">&#9776;</button></div>
+				<div style="flex-grow:100;"><h5 style="vertical-align:middle;margin-left: auto; margin-right:auto;text-align:center;">%DESCRIPTION%</h5></div>
+			</div>
+
+			<div class="w3-container page" id="id%PAGENAME%" style="padding:0px;">
+        <!--<script type="text/javascript" src="%PAGENAME%.js"></script>-->
+
+        <div id="includedContent"></div>
+ 
+
+      </div>
+
+
+
+
+
+
+    	<script type="text/javascript" src="copyright.js"></script>
+		</div>
+	</div>
+
+  
+	<script>
+    function colorMenu(){
+      var i, tablinks;
+		  tablinks = document.getElementsByClassName("tablink");
+		  for (i = 0; i < tablinks.length; i++) {
+        if(tablinks[i].id=="idButton%PAGENAME%"){
+          tablinks[i].className = tablinks[i].className += " w3-red";
+        }
+			
+		  }  
+    }
+		function viewPage(evt, pageName) {
+		  //var i, x, tablinks;
+		  var i, tablinks;
+		  //x = document.getElementsByClassName("page");
+		  //for (i = 0; i < x.length; i++) {
+		//	x[i].style.display = "none";
+		  //}
+		  tablinks = document.getElementsByClassName("tablink");
+		  for (i = 0; i < tablinks.length; i++) {
+			tablinks[i].className = tablinks[i].className.replace(" w3-red", "");
+		  }
+		  //document.getElementById(pageName).style.display = "block";
+		  w3_close();
+		  evt.currentTarget.className += " w3-red";
+		}
+		function w3_open() {
+		  document.getElementById("mySidebar").style.display = "block";
+		  //document.getElementById("mySidebar").style.width = "30%";
+		}
+
+		function w3_close() {
+		  document.getElementById("mySidebar").style.display = "none";
+		}
+
+	</script>
+	
+</body>
+
+</html

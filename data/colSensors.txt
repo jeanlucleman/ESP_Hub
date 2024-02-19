@@ -1,0 +1,3 @@
+42:F5:20:33:25:D4,Salon coté jardin,volet
+41:F5:20:33:25:D4,Chambre,fenêtre
+40:F5:20:33:25:D4,Entrée, porte

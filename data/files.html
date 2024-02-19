@@ -1,0 +1,103 @@
+<!-- ------------------PARTIE HTML  ---------------------------->
+<div class="w3-sand"  style="border:1px solid black;padding:1px;">
+  <select class="w3-select w3-sand"  style="width:300px; border:1px solid black;padding:1px;" name="selectFileList" id="idSelectFileList" onChange="showFileContent(this, 'idFileText')">
+    <option selected value="">Choisir un fichier...</option>
+    <!-- Les différentes options du select sont remplies par le script ci-dessous-->
+  </select>
+  <br />
+  <!--<div id="idFileText" name="FileText" style="white-space: pre;padding-left:25px;width:100%%;background-color: black; color: aliceblue; font-size:0.75em;display:none">-->
+  <textarea id="idFileText" class="editor" rows="20" cols="80" contenteditable="true" name="FileText" style="white-space: pre;padding-left:25px;width:100%%;height:100%;background-color: black; color: aliceblue; font-size:0.75em;display:none" onChange="textChange()">
+  
+  <!-- 
+    https://stackoverflow.com/questions/11423300/new-lines-in-text-within-a-div pour white-space: pre
+    Le contenu de cette div est rempli par la fonction showFileContent du script ci-dessous déclenchée par le onChange du select.
+  -->
+  </textarea>
+  <div id="id_fileName" ></div>
+  <!-- </div> -->
+</div>
+
+<!-- ----------------------Partie Javascript --------------------------->
+<script>
+// Le bloc suivant est exécuté au chargement de la page
+// On demande au serveur de nous renvoyer la liste des fichiers (plutôt que de la passer dans le template)
+// Cette liste est ensuite chargée dans la combolist (select)
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function()
+  {
+      if(this.readyState == 4 && this.status == 200)
+      {
+        // En réponse à la requête ("GET", "getFileList"), le serveur exécute la fonction String getFileList() qui renvoit une 
+        // Chaine de caractère avec la liste des fichiers contenus sur l'ESP. Les noms de fichiers sont 
+        // séparés par le séparateur $$
+        var res = this.responseText.split("$$"); // On crée un tableau de la liste des fichiers
+        var select=document.getElementById("idSelectFileList"); // On récupère le select
+        for (i = 0; i < res.length; i++) 
+          {
+            var newOption = document.createElement("option");  // Create a new option
+            newOption.innerHTML=res[i];                        // Provides the text option
+            select.value=i;                                    // Pas utilisé, mais au cas où...
+            select.appendChild(newOption);                     // Attache la nouvelle option au select
+
+          }
+      }
+  };
+  xhttp.open("GET", "getFileList", true); // Prépare la requête
+  xhttp.send();                           // Envoie la requête vers le serveur (je comprends que le navigateur du client connait l'adresse du serveur qui vien de lui envoyer la page!)
+
+
+// La fonctions ci-dessous est exécutée quand il y a un changement de la ligne sélectionnée du select
+  function showFileContent(selectFileList, idFileText)
+    {
+      if(selectFileList.options[0].value=="")
+        selectFileList.remove(0);
+      var idx = selectFileList.selectedIndex;
+      var fileName = selectFileList.options[idx].innerHTML;
+      var valeur = selectFileList.options[idx].value;
+      var xhttp = new XMLHttpRequest();
+      xhttp.onreadystatechange = function()
+      {
+          if(this.readyState == 4 && this.status == 200)
+          {
+            var textBox = document.getElementById(idFileText);
+            textBox.style.display="block";
+            textBox.innerHTML= this.responseText;
+            document.getElementById('id_fileName').innerHTML=fileName;
+          }
+      };
+      // On crée une requête GET avec un seul argument, le nom du fichier à afficher
+      xhttp.open("GET", "getFileContent?fileName="+fileName, true);
+      xhttp.send();
+    }
+
+  	function textChange()
+		{
+			let saveChange = confirm("Text has been modified. Would you like to save?");
+			if(document.getElementById("idFileText").value.length>2000)
+				{alert("Document is too large and cannot be saved (max 2000 characters)")}
+			else
+				{
+          alert(saveChange);
+				if(saveChange)
+				{
+					var xhttp = new XMLHttpRequest();
+					xhttp.open("POST", "saveFile", true);	
+					var params="filePathName=" + document.getElementById("id_fileName").innerHTML
+					+ "&fileText=" + document.getElementById("idFileText").value;
+          alert(params);
+					xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+					xhttp.onreadystatechange = function()
+						{
+							if(xhttp.readyState == 4 && xhttp.status == 200)
+							{
+								alert("File has been updated!");
+							}
+						}
+					xhttp.send(params);					
+				};			
+				
+				
+				}
+
+		}
+  </script>
